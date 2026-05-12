@@ -1,52 +1,71 @@
-name: Simple Media Downloader
+name: X Range Video Downloader (No Cookies)
 
 on:
   workflow_dispatch:
     inputs:
-      platform:
-        description: "youtube / x"
-        required: true
-        type: choice
-        options:
-          - youtube
-          - x
-
-      url:
-        description: "Profile or channel URL"
+      username:
+        description: "Twitter username (مثال: elonmusk)"
         required: true
 
-      count:
-        description: "How many latest videos?"
-        required: false
-        default: "5"
+      start:
+        description: "شروع از آخر (مثال: 10)"
+        required: true
+
+      end:
+        description: "پایان از آخر (مثال: 15)"
+        required: true
 
 jobs:
   download:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install yt-dlp
+      - name: Install tools
         run: |
           sudo apt update -qq
-          sudo apt install -y ffmpeg
+          sudo apt install -y ffmpeg jq
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
             -o /usr/local/bin/yt-dlp
           sudo chmod +x /usr/local/bin/yt-dlp
+
+      - name: Fetch tweet list
+        run: |
+          USER="${{ github.event.inputs.username }}"
+
+          yt-dlp \
+            --flat-playlist \
+            --playlist-end 300 \
+            "https://twitter.com/$USER" \
+            -J > tweets.json
+
+      - name: Select range from end
+        run: |
+          START="${{ github.event.inputs.start }}"
+          END="${{ github.event.inputs.end }}"
+
+          TOTAL=$(jq '.entries | length' tweets.json)
+
+          START_I=$((TOTAL - START))
+          END_I=$((TOTAL - END))
+
+          jq ".entries[$END_I:$START_I] | .[].url" tweets.json \
+          | tr -d '"' > list.txt
 
       - name: Download videos
         run: |
           mkdir downloads
 
-          COUNT="${{ github.event.inputs.count }}"
-          URL="${{ github.event.inputs.url }}"
+          while read url
+          do
+            yt-dlp \
+              --ignore-errors \
+              --match-filter "duration > 0" \
+              -o "downloads/%(upload_date)s_%(id)s.%(ext)s" \
+              "$url"
+          done < list.txt
 
-          yt-dlp \
-            --playlist-end "$COUNT" \
-            -o "downloads/%(upload_date)s_%(title)s.%(ext)s" \
-            "$URL"
-
-      - name: Upload artifacts
+      - name: Upload result
         uses: actions/upload-artifact@v4
         with:
-          name: downloaded-videos
+          name: x-videos
           path: downloads
