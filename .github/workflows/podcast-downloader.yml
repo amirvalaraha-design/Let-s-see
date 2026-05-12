@@ -8,10 +8,10 @@ on:
         required: true
         type: string
 
-      limit:
-        description: 'How many episodes (RSS only)'
+      items:
+        description: 'Playlist items (example: 1-5 or 5-10)'
         required: false
-        default: '3'
+        default: '1-3'
 
 permissions:
   contents: write
@@ -33,14 +33,15 @@ jobs:
         run: |
           mkdir -p podcasts
           URL="${{ github.event.inputs.podcast_url }}"
-          LIMIT="${{ github.event.inputs.limit }}"
+          ITEMS="${{ github.event.inputs.items }}"
 
           yt-dlp \
             --extract-audio \
             --audio-format mp3 \
             --audio-quality 192K \
             --yes-playlist \
-            --playlist-end "$LIMIT" \
+            --playlist-items "$ITEMS" \
+            --download-archive archive.txt \
             -o "podcasts/%(playlist_title)s/%(title)s.%(ext)s" \
             "$URL"
 
@@ -48,6 +49,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add podcasts/
+          git add podcasts/ archive.txt
           git commit -m "Download podcast" || echo "Nothing to commit"
           git push
