@@ -1,121 +1,135 @@
-name: X Video Downloader
+name: Media Downloader
 
 on:
   workflow_dispatch:
+
     inputs:
 
-      profile:
-        description: "X profile username (without @)"
+      mode:
+        description: "x / podcast / youtube"
         required: true
 
-      start_from_last:
-        description: "Start from Nth last tweet"
+      url:
+        description: "profile / rss / video url"
+        required: true
+
+      start_index:
+        description: "start index"
         default: "1"
-        required: true
 
-      end_from_last:
-        description: "End at Nth last tweet"
+      end_index:
+        description: "end index"
         default: "5"
-        required: true
 
 jobs:
-  download:
+
+  downloader:
 
     runs-on: ubuntu-latest
 
     steps:
 
-      - name: Checkout
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
 
-      - name: Install tools
-        run: |
-          sudo apt update -qq
-          sudo apt install -y jq curl ffmpeg
+    - name: Install tools
+      run: |
 
-          sudo curl -L \
-          https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-          -o /usr/local/bin/yt-dlp
+        sudo apt update -qq
+        sudo apt install -y ffmpeg jq curl
 
-          sudo chmod a+rx /usr/local/bin/yt-dlp
+        sudo curl -L \
+        https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+        -o /usr/local/bin/yt-dlp
 
-
-      - name: Prepare folders
-        run: |
-          mkdir -p downloads/x
-          mkdir -p logs
+        sudo chmod a+rx /usr/local/bin/yt-dlp
 
 
-      - name: Get tweets list
-        run: |
+    - name: Prepare folders
+      run: |
 
-          USER="${{ github.event.inputs.profile }}"
-          START="${{ github.event.inputs.start_from_last }}"
-          END="${{ github.event.inputs.end_from_last }}"
-
-          echo "User: $USER"
-          echo "Start: $START"
-          echo "End: $END"
-
-          yt-dlp \
-            --flat-playlist \
-            --playlist-end 200 \
-            "https://twitter.com/$USER" \
-            -J > tweets.json
+        mkdir -p downloads
+        mkdir -p logs
 
 
-      - name: Select tweet range
-        run: |
+    - name: X downloader
+      if: ${{ github.event.inputs.mode == 'x' }}
+      run: |
 
-          START="${{ github.event.inputs.start_from_last }}"
-          END="${{ github.event.inputs.end_from_last }}"
+        USER="${{ github.event.inputs.url }}"
+        START="${{ github.event.inputs.start_index }}"
+        END="${{ github.event.inputs.end_index }}"
 
-          TOTAL=$(jq '.entries | length' tweets.json)
+        yt-dlp \
+        --flat-playlist \
+        --playlist-end 200 \
+        https://twitter.com/$USER \
+        -J > tweets.json
 
-          START_INDEX=$((TOTAL - START))
-          END_INDEX=$((TOTAL - END))
+        TOTAL=$(jq '.entries | length' tweets.json)
 
-          if [ $END_INDEX -lt 0 ]; then
-            END_INDEX=0
-          fi
+        START_I=$((TOTAL - START))
+        END_I=$((TOTAL - END))
 
-          jq ".entries[$END_INDEX:$START_INDEX] | .[].url" tweets.json \
-          | tr -d '"' > selected.txt
+        jq ".entries[$END_I:$START_I] | .[].url" tweets.json \
+        | tr -d '"' > list.txt
 
-          echo "Selected tweets:"
-          cat selected.txt
+        while read url
+        do
 
+        yt-dlp \
+        --ignore-errors \
+        --match-filter "duration > 0" \
+        -o "downloads/x/%(upload_date)s_%(id)s.%(ext)s" \
+        "$url"
 
-      - name: Download videos
-        run: |
-
-          while read url
-          do
-
-          yt-dlp \
-          --ignore-errors \
-          --no-warnings \
-          --match-filter "duration > 0" \
-          -o "downloads/x/%(uploader)s/%(upload_date)s_%(id)s.%(ext)s" \
-          "$url"
-
-          done < selected.txt
+        done < list.txt
 
 
-      - name: Save logs
-        run: |
-          echo "Done" > logs/x-download.log
+    - name: Podcast downloader
+      if: ${{ github.event.inputs.mode == 'podcast' }}
+      run: |
+
+        RSS="${{ github.event.inputs.url }}"
+        START="${{ github.event.inputs.start_index }}"
+        END="${{ github.event.inputs.end_index }}"
+
+        yt-dlp \
+        --playlist-start $START \
+        --playlist-end $END \
+        -o "downloads/podcast/%(playlist_title)s/%(title)s.%(ext)s" \
+        "$RSS"
 
 
-      - name: Commit files
-        run: |
+    - name: YouTube downloader
+      if: ${{ github.event.inputs.mode == 'youtube' }}
+      run: |
 
-          git config user.name github-actions
-          git config user.email github-actions@github.com
+        URL="${{ github.event.inputs.url }}"
 
-          git add downloads logs
+        yt-dlp \
+        -o "downloads/youtube/%(uploader)s/%(title)s.%(ext)s" \
+        "$URL"
 
-          git commit -m "downloaded x videos" || echo "nothing to commit"
 
-          git push
+    - name: Split large files
+      run: |
+
+        find downloads -type f -size +95M | while read file
+        do
+          zip -s 95m "$file.zip" "$file"
+          rm "$file"
+        done
+
+
+    - name: Commit
+      run: |
+
+        git config user.name github-actions
+        git config user.email github-actions@github.com
+
+        git add downloads
+
+        git commit -m "media downloaded" || echo "no changes"
+
+        git
