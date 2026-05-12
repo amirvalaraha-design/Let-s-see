@@ -51,8 +51,7 @@ jobs:
           mkdir -p downloads/twitter
           mkdir -p logs
 
-      # Download latest profile videos
-      - name: Download latest videos
+           - name: Download latest videos
         run: |
           PROFILE="${{ github.event.inputs.profile_url }}"
           MAX="${{ github.event.inputs.max_videos }}"
@@ -62,16 +61,16 @@ jobs:
 
           yt-dlp \
             --verbose \
-            --flat-playlist \
             --playlist-end $MAX \
-            --extractor-args "twitter:api_v1=1" \
-            --js-runtimes node \
-            --add-header "User-Agent: Mozilla/5.0" \
+            --match-filter "duration > 0" \
+            --extractor-args "twitter:api=syndication" \
+            --user-agent "Mozilla/5.0" \
             --ignore-errors \
             --no-abort-on-error \
             -o "downloads/twitter/%(uploader)s/%(upload_date)s_%(id)s.%(ext)s" \
-            "$PROFILE" \
+            "$PROFILE/media" \
             2>&1 | tee logs/twitter-profile.log
+
 
       # Push files
       - name: Commit files
