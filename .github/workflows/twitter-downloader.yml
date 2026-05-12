@@ -1,0 +1,74 @@
+name: Twitter Video Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      twitter_url:
+        description: "Twitter/X profile URL or single tweet URL"
+        required: true
+        type: string
+
+      date_after:
+        description: "Only download videos after this date (YYYYMMDD) — optional"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install yt-dlp (fast)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg curl
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
+
+      - name: Create download folder
+        run: mkdir -p downloads/twitter
+
+      - name: Download from Twitter/X
+        run: |
+          URL="${{ github.event.inputs.twitter_url }}"
+          DATE="${{ github.event.inputs.date_after }}"
+
+          # Extract username from URL
+          USERNAME=$(echo "$URL" | sed 's#https://##; s#http://##;' | cut -d'/' -f2)
+
+          mkdir -p "downloads/twitter/$USERNAME"
+
+          echo "Downloading videos from: $URL"
+          echo "Saving into: downloads/twitter/$USERNAME"
+
+          if [ -n "$DATE" ]; then
+            echo "Filtering by date after: $DATE"
+            yt-dlp \
+              --dateafter "$DATE" \
+              -f "bv*+ba/b" \
+              --merge-output-format mp4 \
+              -o "downloads/twitter/$USERNAME/%(upload_date)s_%(id)s.%(ext)s" \
+              "$URL"
+          else
+            yt-dlp \
+              -f "bv*+ba/b" \
+              --merge-output-format mp4 \
+              -o "downloads/twitter/$USERNAME/%(upload_date)s_%(id)s.%(ext)s" \
+              "$URL"
+          fi
+
+      - name: Push downloaded files to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add downloads/twitter/
+          git commit -m "Downloaded Twitter videos" || echo "Nothing to commit"
+          git push
