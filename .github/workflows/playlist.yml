@@ -48,26 +48,38 @@ jobs:
 
     steps:
 
+      # -----------------------------
+      # Checkout
+      # -----------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # -----------------------------
+      # FFmpeg
+      # -----------------------------
       - name: Setup FFmpeg
         uses: FedericoCarboni/setup-ffmpeg@v3
 
+      # -----------------------------
+      # Python
+      # -----------------------------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # -----------------------------
+      # yt-dlp
+      # -----------------------------
       - name: Install yt-dlp
         run: |
           python -m pip install --upgrade pip
           pip install -U yt-dlp
 
       # -----------------------------
-      # NodeJS برای PO Token
+      # NodeJS
       # -----------------------------
       - name: Setup NodeJS
         uses: actions/setup-node@v4
@@ -75,29 +87,32 @@ jobs:
           node-version: "20"
 
       # -----------------------------
-      # نصب PO Token Provider از GitHub
+      # نصب PO Token Provider
       # -----------------------------
       - name: Install PO Token Provider
         run: |
           git clone https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git
-          cd bgutil-ytdlp-pot-provider
+
+          cd bgutil-ytdlp-pot-provider/packages/server
+
           npm install
 
       # -----------------------------
-      # اجرای Provider
+      # اجرای PO Token Provider
       # -----------------------------
       - name: Start PO Token Provider
         run: |
-          cd bgutil-ytdlp-pot-provider
+          cd bgutil-ytdlp-pot-provider/packages/server
 
-          nohup node src/server.js \
-            --host 127.0.0.1 \
-            --port 4416 > provider.log 2>&1 &
+          nohup npm start > provider.log 2>&1 &
 
-          sleep 10
+          sleep 15
+
+          echo "===== PROVIDER LOG ====="
+          cat provider.log || true
 
       # -----------------------------
-      # ساخت فولدر دانلود
+      # ساخت فولدر
       # -----------------------------
       - name: Prepare folders
         run: |
@@ -129,11 +144,11 @@ jobs:
               --sleep-interval 5 \
               --max-sleep-interval 15 \
               --concurrent-fragments 1 \
-              --extractor-args "youtube:player_client=android_music,android_creator,tv_embedded,web_safari;po_token_provider=http://127.0.0.1:4416" \
-              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0 Safari/537.36" \
               --geo-bypass \
               --extract-audio \
               --audio-format mp3 \
+              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0 Safari/537.36" \
+              --extractor-args "youtube:player_client=android_music,android_creator,tv_embedded,web_safari;po_token_provider=http://127.0.0.1:4416" \
               -o "downloads/%(playlist_title|NA)s/%(playlist_index|0)03d - %(title)s.%(ext)s" \
               "$URL"
 
@@ -159,9 +174,9 @@ jobs:
               --sleep-interval 5 \
               --max-sleep-interval 15 \
               --concurrent-fragments 1 \
-              --extractor-args "youtube:player_client=android_music,android_creator,tv_embedded,web_safari;po_token_provider=http://127.0.0.1:4416" \
-              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0 Safari/537.36" \
               --geo-bypass \
+              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0 Safari/537.36" \
+              --extractor-args "youtube:player_client=android_music,android_creator,tv_embedded,web_safari;po_token_provider=http://127.0.0.1:4416" \
               -f "$FORMAT_SELECTOR" \
               -o "downloads/%(playlist_title|NA)s/%(playlist_index|0)03d - %(title)s.%(ext)s" \
               "$URL"
@@ -173,10 +188,12 @@ jobs:
       # -----------------------------
       - name: Check downloaded files
         run: |
-          echo "Downloaded files:"
+          echo "===== DOWNLOADED FILES ====="
+
           find downloads -type f | head -50
 
           COUNT=$(find downloads -type f | wc -l)
+
           echo "Files count: $COUNT"
 
           if [ "$COUNT" -eq 0 ]; then
@@ -185,7 +202,7 @@ jobs:
           fi
 
       # -----------------------------
-      # Push به repo
+      # Commit و Push
       # -----------------------------
       - name: Commit and Push
         if: github.event.inputs.upload_release != 'true'
@@ -206,7 +223,7 @@ jobs:
           git push origin HEAD:main
 
       # -----------------------------
-      # ZIP برای release
+      # ZIP
       # -----------------------------
       - name: Create ZIP
         if: github.event.inputs.upload_release == 'true'
@@ -214,7 +231,7 @@ jobs:
           zip -r media.zip downloads
 
       # -----------------------------
-      # Upload Release
+      # Release
       # -----------------------------
       - name: Create Release
         if: github.event.inputs.upload_release == 'true'
