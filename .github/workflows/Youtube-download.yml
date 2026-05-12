@@ -1,26 +1,26 @@
-name: YouTube Downloader (Stable)
+name: YouTube Downloader
 
 on:
   workflow_dispatch:
     inputs:
       video_url:
-        description: 'YouTube URL'
+        description: "YouTube URL"
         required: true
         type: string
 
       format:
-        description: 'Output format'
+        description: "Output format"
         required: true
+        default: mp4
         type: choice
         options:
           - mp4
           - mp3
-        default: mp4
 
       quality:
-        description: 'Quality (720, 1080 for video | 192, 320 for audio)'
+        description: "Quality (video: 720/1080 | audio: 192/320)"
         required: false
-        default: '720'
+        default: "720"
 
 permissions:
   contents: write
@@ -34,25 +34,43 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install yt-dlp
+      - name: Install dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y yt-dlp ffmpeg
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg python3-pip
+          python3 -m pip install --upgrade pip
+          pip3 install --upgrade yt-dlp
+
+      - name: Show yt-dlp version
+        run: yt-dlp --version
+
+      - name: Create download folder
+        run: mkdir -p downloads
+        
+      - name: Debug video info
+        run: |
+          yt-dlp --no-playlist --dump-single-json "${{ github.event.inputs.video_url }}"
 
       - name: Download from YouTube
         run: |
-          mkdir -p downloads
           URL="${{ github.event.inputs.video_url }}"
           FORMAT="${{ github.event.inputs.format }}"
           QUALITY="${{ github.event.inputs.quality }}"
 
+          echo "Downloading: $URL"
+
           if [ "$FORMAT" = "mp3" ]; then
-            yt-dlp -x --audio-format mp3 \
+            yt-dlp \
+              --no-playlist \
+              -x \
+              --audio-format mp3 \
               --audio-quality ${QUALITY}K \
               -o "downloads/%(title)s.%(ext)s" \
               "$URL"
           else
-            yt-dlp -f "bestvideo[height<=${QUALITY}]+bestaudio/best[height<=${QUALITY}]" \
+            yt-dlp \
+              --no-playlist \
+              -f "bv*+ba/b" \
               --merge-output-format mp4 \
               -o "downloads/%(title)s.%(ext)s" \
               "$URL"
@@ -63,5 +81,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add downloads/
-          git commit -m "YouTube download" || echo "Nothing to commit"
+          git commit -m "Downloaded from YouTube" || echo "Nothing to commit"
           git push
