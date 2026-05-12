@@ -1,0 +1,64 @@
+name: YouTube Downloader (Stable)
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'YouTube URL'
+        required: true
+        type: string
+
+      format:
+        description: 'Output format'
+        required: true
+        type: choice
+        options:
+          - mp4
+          - mp3
+        default: mp4
+
+      quality:
+        description: 'Quality (720, 1080 for video | 192, 320 for audio)'
+        required: false
+        default: '720'
+
+permissions:
+  contents: write
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 📦 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Install yt-dlp
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y yt-dlp ffmpeg
+
+      - name: 📥 Download
+        run: |
+          mkdir -p downloads
+          URL="${{ github.event.inputs.video_url }}"
+          FORMAT="${{ github.event.inputs.format }}"
+          QUALITY="${{ github.event.inputs.quality }}"
+
+          if [ "$FORMAT" = "mp3" ]; then
+            yt-dlp -x --audio-format mp3 \
+              --audio-quality ${QUALITY}K \
+              -o "downloads/%(title)s.%(ext)s" \
+              "$URL"
+          else
+            yt-dlp -f "bestvideo[height<=${QUALITY}]+bestaudio/best[height<=${QUALITY}]" \
+              --merge-output-format mp4 \
+              -o "downloads/%(title)s.%(ext)s" \
+              ""
+          fi
+
+      - name: 📤 Push to repo
+        run: |          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add downloads
