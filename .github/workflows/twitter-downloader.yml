@@ -1,137 +1,52 @@
-name: Media Downloader
+name: Simple Media Downloader
 
 on:
   workflow_dispatch:
-
     inputs:
-
-      mode:
-        description: "x / podcast / youtube"
+      platform:
+        description: "youtube / x"
         required: true
+        type: choice
+        options:
+          - youtube
+          - x
 
       url:
-        description: "profile / rss / video url"
+        description: "Profile or channel URL"
         required: true
 
-      start_index:
-        description: "start index"
-        default: "1"
-
-      end_index:
-        description: "end index"
+      count:
+        description: "How many latest videos?"
+        required: false
         default: "5"
 
 jobs:
-
-  downloader:
-
+  download:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Install yt-dlp
+        run: |
+          sudo apt update -qq
+          sudo apt install -y ffmpeg
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+            -o /usr/local/bin/yt-dlp
+          sudo chmod +x /usr/local/bin/yt-dlp
 
-    - uses: actions/checkout@v4
+      - name: Download videos
+        run: |
+          mkdir downloads
 
+          COUNT="${{ github.event.inputs.count }}"
+          URL="${{ github.event.inputs.url }}"
 
-    - name: Install tools
-      run: |
+          yt-dlp \
+            --playlist-end "$COUNT" \
+            -o "downloads/%(upload_date)s_%(title)s.%(ext)s" \
+            "$URL"
 
-        sudo apt update -qq
-        sudo apt install -y ffmpeg jq curl
-
-        sudo curl -L \
-        https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-        -o /usr/local/bin/yt-dlp
-
-        sudo chmod a+rx /usr/local/bin/yt-dlp
-
-
-    - name: Prepare folders
-      run: |
-
-        mkdir -p downloads
-        mkdir -p logs
-
-
-    - name: X downloader
-      if: ${{ github.event.inputs.mode == 'x' }}
-      run: |
-
-        USER="${{ github.event.inputs.url }}"
-        START="${{ github.event.inputs.start_index }}"
-        END="${{ github.event.inputs.end_index }}"
-
-        yt-dlp \
-        --flat-playlist \
-        --playlist-end 200 \
-        https://twitter.com/$USER \
-        -J > tweets.json
-
-        TOTAL=$(jq '.entries | length' tweets.json)
-
-        START_I=$((TOTAL - START))
-        END_I=$((TOTAL - END))
-
-        jq ".entries[$END_I:$START_I] | .[].url" tweets.json \
-        | tr -d '"' > list.txt
-
-        while read url
-        do
-
-        yt-dlp \
-        --ignore-errors \
-        --match-filter "duration > 0" \
-        -o "downloads/x/%(upload_date)s_%(id)s.%(ext)s" \
-        "$url"
-
-        done < list.txt
-
-
-    - name: Podcast downloader
-      if: ${{ github.event.inputs.mode == 'podcast' }}
-      run: |
-
-        RSS="${{ github.event.inputs.url }}"
-        START="${{ github.event.inputs.start_index }}"
-        END="${{ github.event.inputs.end_index }}"
-
-        yt-dlp \
-        --playlist-start $START \
-        --playlist-end $END \
-        -o "downloads/podcast/%(playlist_title)s/%(title)s.%(ext)s" \
-        "$RSS"
-
-
-    - name: YouTube downloader
-      if: ${{ github.event.inputs.mode == 'youtube' }}
-      run: |
-
-        URL="${{ github.event.inputs.url }}"
-
-        yt-dlp \
-        -o "downloads/youtube/%(uploader)s/%(title)s.%(ext)s" \
-        "$URL"
-
-
-    - name: Split large files
-      run: |
-
-        find downloads -type f -size +95M | while read file
-        do
-          zip -s 95m "$file.zip" "$file"
-          rm "$file"
-        done
-
-
-      - name: Commit and push
-      run: |
-        git config user.name "github-actions"
-        git config user.email "github-actions@github.com"
-
-        # اطمینان از اینکه پوشه track می‌شود
-        touch downloads/.gitkeep
-
-        git add downloads
-
-        git commit -m "media downloaded" || echo "no changes to commit"
-
-        git push
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloaded-videos
+          path: downloads
