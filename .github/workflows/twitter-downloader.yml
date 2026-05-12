@@ -1,36 +1,38 @@
-name: Twitter/X Profile Video Downloader
+name: X Video Downloader
 
 on:
   workflow_dispatch:
     inputs:
-      profile_url:
-        description: "Twitter/X profile URL"
+
+      profile:
+        description: "X profile username (without @)"
         required: true
-        type: string
 
-      max_videos:
-        description: "Number of latest videos"
-        required: false
-        default: "20"
-        type: string
+      start_from_last:
+        description: "Start from Nth last tweet"
+        default: "1"
+        required: true
 
-permissions:
-  contents: write
+      end_from_last:
+        description: "End at Nth last tweet"
+        default: "5"
+        required: true
 
 jobs:
   download:
+
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
-      - name: Checkout repository
+
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # Install tools
-      - name: Install dependencies
+
+      - name: Install tools
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg curl nodejs jq
+          sudo apt update -qq
+          sudo apt install -y jq curl ffmpeg
 
           sudo curl -L \
           https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
@@ -38,48 +40,82 @@ jobs:
 
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
-      # Show versions
-      - name: Tool versions
-        run: |
-          yt-dlp --version
-          node --version
-          ffmpeg -version | head -n 1
 
-      # Prepare folders
       - name: Prepare folders
         run: |
-          mkdir -p downloads/twitter
+          mkdir -p downloads/x
           mkdir -p logs
 
-           - name: Download latest videos
-        run: |
-          PROFILE="${{ github.event.inputs.profile_url }}"
-          MAX="${{ github.event.inputs.max_videos }}"
 
-          echo "PROFILE=$PROFILE"
-          echo "MAX=$MAX"
+      - name: Get tweets list
+        run: |
+
+          USER="${{ github.event.inputs.profile }}"
+          START="${{ github.event.inputs.start_from_last }}"
+          END="${{ github.event.inputs.end_from_last }}"
+
+          echo "User: $USER"
+          echo "Start: $START"
+          echo "End: $END"
 
           yt-dlp \
-            --verbose \
-            --playlist-end $MAX \
-            --match-filter "duration > 0" \
-            --extractor-args "twitter:api=syndication" \
-            --user-agent "Mozilla/5.0" \
-            --ignore-errors \
-            --no-abort-on-error \
-            -o "downloads/twitter/%(uploader)s/%(upload_date)s_%(id)s.%(ext)s" \
-            "$PROFILE/media" \
-            2>&1 | tee logs/twitter-profile.log
+            --flat-playlist \
+            --playlist-end 200 \
+            "https://twitter.com/$USER" \
+            -J > tweets.json
 
 
-      # Push files
+      - name: Select tweet range
+        run: |
+
+          START="${{ github.event.inputs.start_from_last }}"
+          END="${{ github.event.inputs.end_from_last }}"
+
+          TOTAL=$(jq '.entries | length' tweets.json)
+
+          START_INDEX=$((TOTAL - START))
+          END_INDEX=$((TOTAL - END))
+
+          if [ $END_INDEX -lt 0 ]; then
+            END_INDEX=0
+          fi
+
+          jq ".entries[$END_INDEX:$START_INDEX] | .[].url" tweets.json \
+          | tr -d '"' > selected.txt
+
+          echo "Selected tweets:"
+          cat selected.txt
+
+
+      - name: Download videos
+        run: |
+
+          while read url
+          do
+
+          yt-dlp \
+          --ignore-errors \
+          --no-warnings \
+          --match-filter "duration > 0" \
+          -o "downloads/x/%(uploader)s/%(upload_date)s_%(id)s.%(ext)s" \
+          "$url"
+
+          done < selected.txt
+
+
+      - name: Save logs
+        run: |
+          echo "Done" > logs/x-download.log
+
+
       - name: Commit files
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git config user.name github-actions
+          git config user.email github-actions@github.com
 
           git add downloads logs
 
-          git commit -m "Downloaded Twitter/X profile videos" || echo "Nothing to commit"
+          git commit -m "downloaded x videos" || echo "nothing to commit"
 
           git push
