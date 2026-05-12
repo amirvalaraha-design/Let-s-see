@@ -1,53 +1,50 @@
-name: دانلودر یوتیوب بدون کوکی
+name: دانلودر یوتیوب پایدار V2
 
 on:
   workflow_dispatch:
     inputs:
-      video_url:
-        description: 'YouTube video or playlist URL'
+      url:
+        description: "لینک ویدیو یا پلی‌لیست"
         required: true
-        type: string
 
       quality:
-        description: 'Video quality'
+        description: "کیفیت"
         required: true
+        default: "720"
         type: choice
         options:
-          - best
-          - '1080'
-          - '720'
-          - '480'
-          - '360'
-        default: '720'
+          - "360"
+          - "480"
+          - "720"
+          - "1080"
+          - "best"
 
-      playlist_items:
-        description: 'Playlist items (empty=single, all=full, 1-5, 1,3,7)'
-        required: false
-        type: string
+      format:
+        description: "فرمت"
+        required: true
+        default: "mp4"
+        type: choice
+        options:
+          - "mp4"
+          - "mp3"
 
-      output_folder:
-        description: 'Download folder'
-        required: false
-        type: string
-        default: 'downloads'
-
-      audio_only:
-        description: 'Download audio only (mp3)'
-        required: false
-        type: boolean
+      upload_release:
+        description: "آپلود در Releases"
+        required: true
         default: false
+        type: boolean
 
 permissions:
   contents: write
 
 concurrency:
-  group: yt-dlp-download
+  group: youtube-downloader
   cancel-in-progress: false
 
 jobs:
   download:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 360
 
     steps:
       - name: Checkout repository
@@ -55,99 +52,165 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install dependencies
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install yt-dlp
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg zip
-          python -m pip install -U pip
+          python -m pip install --upgrade pip
+
           pip install -U yt-dlp
 
-      - name: Create output directory
-        run: |
-          mkdir -p "${{ github.event.inputs.output_folder }}"
+      # -----------------------------
+      # POT Provider
+      # -----------------------------
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
+      - name: Install PO Token Provider
+        run: |
+          npm install -g bgutil-ytdlp-pot-provider
+
+      - name: Start PO Token Provider
+        run: |
+          nohup bgutil-ytdlp-pot-provider server \
+            --host 127.0.0.1 \
+            --port 4416 > provider.log 2>&1 &
+
+          sleep 10
+
+      # -----------------------------
+      # Prepare folders
+      # -----------------------------
+      - name: Prepare folders
+        run: |
+          mkdir -p downloads
+
+      # -----------------------------
+      # Download
+      # -----------------------------
       - name: Download media
+        shell: bash
         run: |
 
-          URL="${{ github.event.inputs.video_url }}"
+          URL="${{ github.event.inputs.url }}"
           QUALITY="${{ github.event.inputs.quality }}"
-          OUTPUT="${{ github.event.inputs.output_folder }}"
-          PLAYLIST_ITEMS="${{ github.event.inputs.playlist_items }}"
-          AUDIO_ONLY="${{ github.event.inputs.audio_only }}"
+          FORMAT="${{ github.event.inputs.format }}"
 
-          PLAYLIST_ARGS="--no-playlist"
+          if [ "$FORMAT" = "mp3" ]; then
 
-          if [ "$PLAYLIST_ITEMS" = "all" ]; then
-            PLAYLIST_ARGS=""
-          elif [ -n "$PLAYLIST_ITEMS" ]; then
-            PLAYLIST_ARGS="--playlist-items $PLAYLIST_ITEMS"
-          fi
+            yt-dlp \
+              --yes-playlist \
+              --ignore-errors \
+              --continue \
+              --no-overwrites \
+              --retries 20 \
+              --fragment-retries 20 \
+              --extractor-retries 20 \
+              --file-access-retries 10 \
+              --sleep-requests 3 \
+              --sleep-interval 5 \
+              --max-sleep-interval 15 \
+              --concurrent-fragments 1 \
+              --extractor-args "youtube:player_client=android_music,android_creator,tv_embedded,web_safari;po_token_provider=http://127.0.0.1:4416" \
+              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0 Safari/537.36" \
+              --geo-bypass \
+              --audio-format mp3 \
+              --extract-audio \
+              -o "downloads/%(playlist_title|NA)s/%(playlist_index|0)03d - %(title)s.%(ext)s" \
+              "$URL"
 
-          if [ "$AUDIO_ONLY" = "true" ]; then
-            FORMAT_ARGS="-x --audio-format mp3 --audio-quality 192K"
           else
 
             if [ "$QUALITY" = "best" ]; then
-              FORMAT_ARGS="-f bestvideo+bestaudio/best"
+              FORMAT_SELECTOR="bv*+ba/b"
             else
-              FORMAT_ARGS="-f bestvideo[height<=${QUALITY}]+bestaudio/best[height<=${QUALITY}]"
+              FORMAT_SELECTOR="bv*[height<=${QUALITY}]+ba/b[height<=${QUALITY}]"
             fi
 
-            FORMAT_ARGS="$FORMAT_ARGS --merge-output-format mp4"
+            yt-dlp \
+              --yes-playlist \
+              --ignore-errors \
+              --continue \
+              --no-overwrites \
+              --merge-output-format mp4 \
+              --retries 20 \
+              --fragment-retries 20 \
+              --extractor-retries 20 \
+              --file-access-retries 10 \
+              --sleep-requests 3 \
+              --sleep-interval 5 \
+              --max-sleep-interval 15 \
+              --concurrent-fragments 1 \
+              --extractor-args "youtube:player_client=android_music,android_creator,tv_embedded,web_safari;po_token_provider=http://127.0.0.1:4416" \
+              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125.0 Safari/537.36" \
+              --geo-bypass \
+              -f "$FORMAT_SELECTOR" \
+              -o "downloads/%(playlist_title|NA)s/%(playlist_index|0)03d - %(title)s.%(ext)s" \
+              "$URL"
+
           fi
 
-          yt-dlp \
-            $FORMAT_ARGS \
-            $PLAYLIST_ARGS \
-            --ignore-errors \
-            --no-abort-on-error \
-            --retries 15 \
-            --fragment-retries 15 \
-            --extractor-retries 15 \
-            --file-access-retries 10 \
-            --sleep-requests 3 \
-            --sleep-interval 5 \
-            --max-sleep-interval 15 \
-            --concurrent-fragments 1 \
-            --extractor-args "youtube:player_client=android,tv_embedded,web" \
-            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36" \
-            --newline \
-            --continue \
-            --no-overwrites \
-            --embed-metadata \
-            --embed-thumbnail \
-            -o "$OUTPUT/%(title)s [%(id)s].%(ext)s" \
-            "$URL"
+      # -----------------------------
+      # Check files
+      # -----------------------------
+      - name: Check downloaded files
+        run: |
+          echo "Downloaded files:"
+          find downloads -type f | head -50
 
-      - name: Split large files
+          COUNT=$(find downloads -type f | wc -l)
+
+          echo "Files count: $COUNT"
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "هیچ فایلی دانلود نشد"
+            exit 1
+          fi
+
+      # -----------------------------
+      # Push to repo
+      # -----------------------------
+      - name: Commit and Push
+        if: github.event.inputs.upload_release != 'true'
         run: |
 
-          OUTPUT="${{ github.event.inputs.output_folder }}"
-          MAX_MB=90
-          MAX_BYTES=$((MAX_MB * 1024 * 1024))
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          for f in "$OUTPUT"/*; do
-            [ -f "$f" ] || continue
+          git add downloads/
 
-            SIZE=$(stat -c%s "$f")
+          git diff --cached --quiet && echo "No changes" && exit 0
 
-            if [ "$SIZE" -gt "$MAX_BYTES" ]; then
-              zip -j -s "${MAX_MB}m" "$f.zip" "$f"
-              rm "$f"
-            fi
-          done
-
-      - name: Push files
-        run: |
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add "${{ github.event.inputs.output_folder }}/"
-
-          git commit -m "Downloaded from YouTube [skip ci]" || echo "Nothing to commit"
+          git commit -m "Add downloaded media"
 
           git fetch origin main
           git rebase origin/main
 
           git push origin HEAD:main
+
+      # -----------------------------
+      # Zip files
+      # -----------------------------
+      - name: Create ZIP
+        if: github.event.inputs.upload_release == 'true'
+        run: |
+          zip -r media.zip downloads
+
+      # -----------------------------
+      # Upload Release
+      # -----------------------------
+      - name: Create Release
+        if: github.event.inputs.upload_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: download-${{ github.run_number }}
+          name: دانلود شماره ${{ github.run_number }}
+          files: media.zip
