@@ -1,0 +1,33 @@
+name: YouTube Search via GitHub
+
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: 'Search phrase'
+        required: true
+        default: 'biology lecture'
+      count:
+        description: 'Number of results'
+        required: true
+        default: '5'
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Install yt-dlp
+      run: |
+        sudo apt update
+        sudo apt install -y yt-dlp
+
+    - name: Search YouTube
+      run: |
+        yt-dlp -J "ytsearch${{ github.event.inputs.count }}:${{ github.event.inputs.query }}" > results.json
+
+    - name: Upload results
+      uses: actions/upload-artifact@v4
+      with:
+        name: youtube-results
+        path: results.json
