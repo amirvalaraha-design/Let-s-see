@@ -122,14 +122,16 @@ jobs:
         done
 
 
-    - name: Commit
+      - name: Commit and push
       run: |
+        git config user.name "github-actions"
+        git config user.email "github-actions@github.com"
 
-        git config user.name github-actions
-        git config user.email github-actions@github.com
+        # اطمینان از اینکه پوشه track می‌شود
+        touch downloads/.gitkeep
 
         git add downloads
 
-        git commit -m "media downloaded" || echo "no changes"
+        git commit -m "media downloaded" || echo "no changes to commit"
 
-        git
+        git push
