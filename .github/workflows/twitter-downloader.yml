@@ -1,34 +1,17 @@
-name: Media Downloader (YouTube + Twitter)
+name: Twitter/X Profile Video Downloader
 
 on:
   workflow_dispatch:
     inputs:
-      source:
-        description: "Select source"
-        required: true
-        type: choice
-        options:
-          - youtube
-          - twitter
-
-      media_url:
-        description: "Video / Playlist URL"
+      profile_url:
+        description: "Twitter/X profile URL"
         required: true
         type: string
 
-      format:
-        description: "Download format"
-        required: true
-        default: mp4
-        type: choice
-        options:
-          - mp4
-          - mp3
-
-      quality:
-        description: "Quality (mp4: 720/1080 | mp3: 128/192/320)"
+      max_videos:
+        description: "Number of latest videos"
         required: false
-        default: "720"
+        default: "20"
         type: string
 
 permissions:
@@ -37,95 +20,67 @@ permissions:
 jobs:
   download:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1️⃣ Install deps + JS runtime
+      # Install tools
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg curl nodejs
-          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo apt-get install -y ffmpeg curl nodejs jq
+
+          sudo curl -L \
+          https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+          -o /usr/local/bin/yt-dlp
+
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
-      - name: Show versions
+      # Show versions
+      - name: Tool versions
         run: |
-          echo "yt-dlp:"
           yt-dlp --version
-          echo "node:"
           node --version
-          echo "ffmpeg:"
           ffmpeg -version | head -n 1
 
-      # 2️⃣ Prepare folders
+      # Prepare folders
       - name: Prepare folders
         run: |
-          mkdir -p downloads/youtube
           mkdir -p downloads/twitter
           mkdir -p logs
 
-      # 3️⃣ Download step (smart switch)
-      - name: Download media
+      # Download latest profile videos
+      - name: Download latest videos
         run: |
-          SOURCE="${{ github.event.inputs.source }}"
-          URL="${{ github.event.inputs.media_url }}"
-          FORMAT="${{ github.event.inputs.format }}"
-          QUALITY="${{ github.event.inputs.quality }}"
+          PROFILE="${{ github.event.inputs.profile_url }}"
+          MAX="${{ github.event.inputs.max_videos }}"
 
-          echo "SOURCE=$SOURCE"
-          echo "URL=$URL"
-          echo "FORMAT=$FORMAT"
-          echo "QUALITY=$QUALITY"
+          echo "PROFILE=$PROFILE"
+          echo "MAX=$MAX"
 
-          COMMON_ARGS="\
-          --verbose \
-          --js-runtimes node \
-          --add-header User-Agent:Mozilla/5.0 \
-          --ignore-errors \
-          --no-abort-on-error \
-          "
+          yt-dlp \
+            --verbose \
+            --flat-playlist \
+            --playlist-end $MAX \
+            --extractor-args "twitter:api_v1=1" \
+            --js-runtimes node \
+            --add-header "User-Agent: Mozilla/5.0" \
+            --ignore-errors \
+            --no-abort-on-error \
+            -o "downloads/twitter/%(uploader)s/%(upload_date)s_%(id)s.%(ext)s" \
+            "$PROFILE" \
+            2>&1 | tee logs/twitter-profile.log
 
-          if [ "$SOURCE" = "youtube" ]; then
-            echo "Downloading from YouTube..."
-
-            if [ "$FORMAT" = "mp3" ]; then
-              yt-dlp \
-                $COMMON_ARGS \
-                --extractor-args youtube:player_client=android \
-                -x \
-                --audio-format mp3 \
-                --audio-quality ${QUALITY}K \
-                -o "downloads/youtube/%(title)s.%(ext)s" \
-                "$URL" 2>&1 | tee logs/youtube.log
-            else
-              yt-dlp \
-                $COMMON_ARGS \
-                --extractor-args youtube:player_client=android \
-                -f "bv*[height<=${QUALITY}]+ba/b" \
-                --merge-output-format mp4 \
-                -o "downloads/youtube/%(title)s.%(ext)s" \
-                "$URL" 2>&1 | tee logs/youtube.log
-            fi
-
-          elif [ "$SOURCE" = "twitter" ]; then
-            echo "Downloading from Twitter/X..."
-
-            yt-dlp \
-              $COMMON_ARGS \
-              --extractor-args twitter:api_v1=1 \
-              -f "bestvideo+bestaudio/best" \
-              -o "downloads/twitter/%(uploader)s_%(id)s.%(ext)s" \
-              "$URL" 2>&1 | tee logs/twitter.log
-          fi
-
-      # 4️⃣ Commit results
-      - name: Commit downloads
+      # Push files
+      - name: Commit files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add downloads logs
-          git commit -m "Media download" || echo "Nothing to commit"
+
+          git commit -m "Downloaded Twitter/X profile videos" || echo "Nothing to commit"
+
           git push
