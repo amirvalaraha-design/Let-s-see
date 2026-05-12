@@ -1,4 +1,4 @@
-[debug] Command-line config: ['--verbose', '--flat-playlist', '--playlist-end', '20', '--extractor-args', 'twitter:api_v1=1', '--js-runtimes', 'node', '--add-header', 'User-Agent: Mozilla/5.0', '--ignore-errors', '--no-abort-on-error', '-o', 'downloads/twitter/%(uploader)s/%(upload_date)s_%(id)s.%(ext)s', 'https://x.com/gaybatestash?t=ov4Z1bI2UPqYedvgM7EJgQ&s=35']
+[debug] Command-line config: ['--verbose', '--flat-playlist', '--playlist-end', '20', '--extractor-args', 'twitter:api_v1=1', '--js-runtimes', 'node', '--add-header', 'User-Agent: Mozilla/5.0', '--ignore-errors', '--no-abort-on-error', '-o', 'downloads/twitter/%(uploader)s/%(upload_date)s_%(id)s.%(ext)s', 'https://x.com/gaybatestash']
 [debug] Encodings: locale UTF-8, fs utf-8, pref UTF-8, out utf-8 (No ANSI), error utf-8 (No ANSI), screen utf-8 (No ANSI)
 [debug] yt-dlp version stable@2026.03.17 from yt-dlp/yt-dlp [04d6974f5] (zip)
 [debug] Python 3.12.3 (CPython x86_64 64bit) - Linux-6.17.0-1010-azure-x86_64-with-glibc2.39 (OpenSSL 3.0.13 30 Jan 2024, glibc 2.39)
@@ -9,12 +9,12 @@
 [debug] Request Handlers: urllib
 [debug] Plugin directories: none
 [debug] Loaded 1864 extractors
-[generic] Extracting URL: https://x.com/gaybatestash?t=ov4Z1bI2UPqYedvgM7EJgQ&s=35
-[generic] gaybatestash?t=ov4Z1bI2UPqYedvgM7EJgQ&s=35: Downloading webpage
+[generic] Extracting URL: https://x.com/gaybatestash
+[generic] gaybatestash: Downloading webpage
 WARNING: [generic] Falling back on generic information extractor
-[generic] gaybatestash?t=ov4Z1bI2UPqYedvgM7EJgQ&s=35: Extracting information
+[generic] gaybatestash: Extracting information
 [debug] Looking for embeds
-ERROR: Unsupported URL: https://x.com/gaybatestash?t=ov4Z1bI2UPqYedvgM7EJgQ&s=35
+ERROR: Unsupported URL: https://x.com/gaybatestash
 Traceback (most recent call last):
   File "/usr/local/bin/yt-dlp/yt_dlp/YoutubeDL.py", line 1698, in wrapper
     return func(self, *args, **kwargs)
@@ -27,5 +27,5 @@ Traceback (most recent call last):
                 ^^^^^^^^^^^^^^^^^^^^^^^
   File "/usr/local/bin/yt-dlp/yt_dlp/extractor/generic.py", line 984, in _real_extract
     raise UnsupportedError(url)
-yt_dlp.utils.UnsupportedError: Unsupported URL: https://x.com/gaybatestash?t=ov4Z1bI2UPqYedvgM7EJgQ&s=35
+yt_dlp.utils.UnsupportedError: Unsupported URL: https://x.com/gaybatestash
 
