@@ -1,0 +1,153 @@
+name: دانلودر یوتیوب بدون کوکی
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'YouTube video or playlist URL'
+        required: true
+        type: string
+
+      quality:
+        description: 'Video quality'
+        required: true
+        type: choice
+        options:
+          - best
+          - '1080'
+          - '720'
+          - '480'
+          - '360'
+        default: '720'
+
+      playlist_items:
+        description: 'Playlist items (empty=single, all=full, 1-5, 1,3,7)'
+        required: false
+        type: string
+
+      output_folder:
+        description: 'Download folder'
+        required: false
+        type: string
+        default: 'downloads'
+
+      audio_only:
+        description: 'Download audio only (mp3)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: yt-dlp-download
+  cancel-in-progress: false
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg zip
+          python -m pip install -U pip
+          pip install -U yt-dlp
+
+      - name: Create output directory
+        run: |
+          mkdir -p "${{ github.event.inputs.output_folder }}"
+
+      - name: Download media
+        run: |
+
+          URL="${{ github.event.inputs.video_url }}"
+          QUALITY="${{ github.event.inputs.quality }}"
+          OUTPUT="${{ github.event.inputs.output_folder }}"
+          PLAYLIST_ITEMS="${{ github.event.inputs.playlist_items }}"
+          AUDIO_ONLY="${{ github.event.inputs.audio_only }}"
+
+          PLAYLIST_ARGS="--no-playlist"
+
+          if [ "$PLAYLIST_ITEMS" = "all" ]; then
+            PLAYLIST_ARGS=""
+          elif [ -n "$PLAYLIST_ITEMS" ]; then
+            PLAYLIST_ARGS="--playlist-items $PLAYLIST_ITEMS"
+          fi
+
+          if [ "$AUDIO_ONLY" = "true" ]; then
+            FORMAT_ARGS="-x --audio-format mp3 --audio-quality 192K"
+          else
+
+            if [ "$QUALITY" = "best" ]; then
+              FORMAT_ARGS="-f bestvideo+bestaudio/best"
+            else
+              FORMAT_ARGS="-f bestvideo[height<=${QUALITY}]+bestaudio/best[height<=${QUALITY}]"
+            fi
+
+            FORMAT_ARGS="$FORMAT_ARGS --merge-output-format mp4"
+          fi
+
+          yt-dlp \
+            $FORMAT_ARGS \
+            $PLAYLIST_ARGS \
+            --ignore-errors \
+            --no-abort-on-error \
+            --retries 15 \
+            --fragment-retries 15 \
+            --extractor-retries 15 \
+            --file-access-retries 10 \
+            --sleep-requests 3 \
+            --sleep-interval 5 \
+            --max-sleep-interval 15 \
+            --concurrent-fragments 1 \
+            --extractor-args "youtube:player_client=android,tv_embedded,web" \
+            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36" \
+            --newline \
+            --continue \
+            --no-overwrites \
+            --embed-metadata \
+            --embed-thumbnail \
+            -o "$OUTPUT/%(title)s [%(id)s].%(ext)s" \
+            "$URL"
+
+      - name: Split large files
+        run: |
+
+          OUTPUT="${{ github.event.inputs.output_folder }}"
+          MAX_MB=90
+          MAX_BYTES=$((MAX_MB * 1024 * 1024))
+
+          for f in "$OUTPUT"/*; do
+            [ -f "$f" ] || continue
+
+            SIZE=$(stat -c%s "$f")
+
+            if [ "$SIZE" -gt "$MAX_BYTES" ]; then
+              zip -j -s "${MAX_MB}m" "$f.zip" "$f"
+              rm "$f"
+            fi
+          done
+
+      - name: Push files
+        run: |
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add "${{ github.event.inputs.output_folder }}/"
+
+          git commit -m "Downloaded from YouTube [skip ci]" || echo "Nothing to commit"
+
+          git fetch origin main
+          git rebase origin/main
+
+          git push origin HEAD:main
