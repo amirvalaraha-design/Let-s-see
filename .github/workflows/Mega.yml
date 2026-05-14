@@ -21,14 +21,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install megatools
+      - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y megatools
+          sudo apt install -y megatools rar zip
 
-      - name: Create download folder
+      - name: Create folders
         run: |
           mkdir -p downloads
+          mkdir -p upload_parts
 
       - name: Download from MEGA
         run: |
@@ -36,28 +37,28 @@ jobs:
             --path downloads \
             "${{ github.event.inputs.mega_url }}"
 
-      - name: Show files
+      - name: Show downloaded files
         run: |
           ls -lah downloads
 
-      - name: Commit files to repo
+      - name: Create multi-part RAR archive
+        run: |
+          rar a -v90m upload_parts/mega_archive.rar downloads/
+
+      - name: Show archive parts
+        run: |
+          ls -lah upload_parts
+
+      - name: Commit archive parts to repository
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add downloads/*
-          git commit -m "Add MEGA download from ${{ github.event.inputs.mega_url }}" || echo "No changes"
+          git add upload_parts/*
+
+          git commit -m "Add MEGA multipart archive" || echo "No changes"
 
           git pull --rebase origin main
+
           git push origin main
 
-      - name: Compress downloads
-        run: |
-          cd downloads
-          zip -r ../mega_download.zip .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mega-download
-          path: mega_download.zip
