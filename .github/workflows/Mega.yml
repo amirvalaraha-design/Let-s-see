@@ -1,0 +1,39 @@
+name: Download from MEGA
+
+on:
+  workflow_dispatch:
+    inputs:
+      mega_url:
+        description: "MEGA file or folder URL"
+        required: true
+        type: string
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install megatools
+        run: |
+          sudo apt update
+          sudo apt install -y megatools zip
+
+      - name: Create download folder
+        run: mkdir downloads
+
+      - name: Download from MEGA
+        run: |
+          megadl --path downloads "${{ github.event.inputs.mega_url }}"
+
+      - name: Zip files
+        run: |
+          zip -r mega_download.zip downloads
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mega-files
+          path: mega_download.zip
