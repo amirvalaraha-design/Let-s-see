@@ -8,32 +8,43 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   download:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install megatools
+      - name: Install MEGA tools
         run: |
           sudo apt update
           sudo apt install -y megatools zip
 
       - name: Create download folder
-        run: mkdir downloads
+        run: |
+          mkdir -p downloads
 
       - name: Download from MEGA
         run: |
-          megadl --path downloads "${{ github.event.inputs.mega_url }}"
+          megadl \
+            --path downloads \
+            "${{ github.event.inputs.mega_url }}"
 
-      - name: Zip files
+      - name: Show downloaded files
         run: |
-          zip -r mega_download.zip downloads
+          ls -lah downloads
+
+      - name: Compress downloads
+        run: |
+          cd downloads
+          zip -r ../mega_download.zip .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mega-files
+          name: mega-download
           path: mega_download.zip
