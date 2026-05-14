@@ -1,4 +1,4 @@
-name: Download from MEGA
+name: Download from MEGA to Repo
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   download:
@@ -18,11 +18,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Install MEGA tools
+      - name: Install megatools
         run: |
           sudo apt update
-          sudo apt install -y megatools zip
+          sudo apt install -y megatools
 
       - name: Create download folder
         run: |
@@ -34,9 +36,20 @@ jobs:
             --path downloads \
             "${{ github.event.inputs.mega_url }}"
 
-      - name: Show downloaded files
+      - name: Show files
         run: |
           ls -lah downloads
+
+      - name: Commit files to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add downloads/*
+          git commit -m "Add MEGA download from ${{ github.event.inputs.mega_url }}" || echo "No changes"
+
+          git pull --rebase origin main
+          git push origin main
 
       - name: Compress downloads
         run: |
