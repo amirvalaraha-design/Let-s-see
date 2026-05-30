@@ -1,0 +1,97 @@
+name: X Video Range Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: "Twitter username (مثال: elonmusk)"
+        required: true
+
+      start:
+        description: "شروع از آخر (مثال: 10)"
+        required: true
+
+      end:
+        description: "پایان از آخر (مثال: 15)"
+        required: true
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt update -qq
+          sudo apt install -y ffmpeg jq
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+          -o /usr/local/bin/yt-dlp
+          sudo chmod +x /usr/local/bin/yt-dlp
+          yt-dlp --version
+
+      - name: Export cookies
+        run: |
+          echo "${{ secrets.X_COOKIES }}" > cookies.txt
+
+      # نگه داشتن لیست دانلودشده‌ها بین اجراهای مختلف
+      - name: Restore yt-dlp archive cache
+        uses: actions/cache@v4
+        with:
+          path: ytdlp-archive.txt
+          key: ytdlp-archive-${{ github.event.inputs.username }}
+          restore-keys: |
+            ytdlp-archive-${{ github.event.inputs.username }}
+
+      - name: Fetch tweet list
+        run: |
+          USER="${{ github.event.inputs.username }}"
+          yt-dlp \
+            --cookies cookies.txt \
+            --flat-playlist \
+            --playlist-end 300 \
+            "https://twitter.com/$USER" \
+            -J > tweets.json
+
+      - name: Select range from end + unique
+        run: |
+          START="${{ github.event.inputs.start }}"
+          END="${{ github.event.inputs.end }}"
+
+          TOTAL=$(jq '.entries | length' tweets.json)
+          echo "TOTAL=$TOTAL"
+
+          # start باید کوچکتر از end باشد (مثلاً start=10 و end=15)
+          START_I=$((TOTAL - START))
+          END_I=$((TOTAL - END))
+
+          if [ "$END_I" -lt 0 ]; then END_I=0; fi
+          if [ "$START_I" -lt 0 ]; then START_I=0; fi
+
+          jq -r ".entries[$END_I:$START_I] | .[].url" tweets.json \
+          | sed '/^null$/d' \
+          | sort -u > list.txt
+
+          echo "Selected URLs: $(wc -l < list.txt)"
+
+      - name: Download videos (skip duplicates)
+        run: |
+          mkdir -p downloads
+
+          while read url
+          do
+            yt-dlp \
+              --cookies cookies.txt \
+              --ignore-errors \
+              --no-playlist \
+              --download-archive ytdlp-archive.txt \
+              --match-filter "duration > 0" \
+              -f "bv*+ba/b" \
+              -o "downloads/%(upload_date)s_%(id)s.%(ext)s" \
+              "$url"
+          done < list.txt
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-videos
+          path: downloads
