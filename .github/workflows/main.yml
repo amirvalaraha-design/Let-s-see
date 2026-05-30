@@ -4,15 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       username:
-        description: "Twitter username (مثال: elonmusk)"
+        description: "X username (مثال: elonmusk) بدون @"
         required: true
-
       start:
-        description: "شروع از آخر (مثال: 10)"
+        description: "شروع از آخر (مثال: 10)  ← کوچکتر از end باشد"
         required: true
-
       end:
-        description: "پایان از آخر (مثال: 15)"
+        description: "پایان از آخر (مثال: 15)  ← بزرگتر از start باشد"
         required: true
 
 jobs:
@@ -22,19 +20,22 @@ jobs:
     steps:
       - name: Install tools
         run: |
+          set -e
           sudo apt update -qq
           sudo apt install -y ffmpeg jq
-          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-          -o /usr/local/bin/yt-dlp
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod +x /usr/local/bin/yt-dlp
+
+          echo "yt-dlp path: $(which yt-dlp)"
           yt-dlp --version
+          echo "Has twitter extractor?"
+          yt-dlp --list-extractors | grep -i twitter || true
 
       - name: Export cookies
         run: |
           echo "${{ secrets.X_COOKIES }}" > cookies.txt
 
-      # نگه داشتن لیست دانلودشده‌ها بین اجراهای مختلف
-      - name: Restore yt-dlp archive cache
+      - name: Restore yt-dlp archive cache (skip duplicates across runs)
         uses: actions/cache@v4
         with:
           path: ytdlp-archive.txt
@@ -42,18 +43,27 @@ jobs:
           restore-keys: |
             ytdlp-archive-${{ github.event.inputs.username }}
 
-      - name: Fetch tweet list
+      - name: Fetch list from X (media tab)
         run: |
+          set -e
           USER="${{ github.event.inputs.username }}"
+
+          # نکته: به جای پروفایل خام، از /media استفاده می‌کنیم تا yt-dlp بهتر تشخیص دهد
+          URL="https://x.com/$USER/media"
+          echo "Fetching: $URL"
+
           yt-dlp \
             --cookies cookies.txt \
             --flat-playlist \
-            --playlist-end 300 \
-            "https://twitter.com/$USER" \
+            --playlist-end 400 \
+            "$URL" \
             -J > tweets.json
+
+          echo "Entries: $(jq '.entries | length' tweets.json)"
 
       - name: Select range from end + unique
         run: |
+          set -e
           START="${{ github.event.inputs.start }}"
           END="${{ github.event.inputs.end }}"
 
@@ -68,17 +78,23 @@ jobs:
           if [ "$START_I" -lt 0 ]; then START_I=0; fi
 
           jq -r ".entries[$END_I:$START_I] | .[].url" tweets.json \
-          | sed '/^null$/d' \
-          | sort -u > list.txt
+            | sed '/^null$/d' \
+            | sort -u > list.txt
 
           echo "Selected URLs: $(wc -l < list.txt)"
+          echo "Sample:"
+          head -n 20 list.txt || true
 
-      - name: Download videos (skip duplicates)
+      - name: Download videos (skip duplicates, video-only attempts)
         run: |
+          set -e
           mkdir -p downloads
 
           while read url
           do
+            [ -z "$url" ] && continue
+            echo "Downloading: $url"
+
             yt-dlp \
               --cookies cookies.txt \
               --ignore-errors \
