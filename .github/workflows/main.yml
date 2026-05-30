@@ -1,4 +1,4 @@
-name: X Video Range Downloader
+name: X Video Range Downloader (Playwright + yt-dlp)
 
 on:
   workflow_dispatch:
@@ -12,27 +12,35 @@ on:
       end:
         description: "پایان از آخر (مثال: 15)  ← بزرگتر از start باشد"
         required: true
+      scroll_pages:
+        description: "چند بار اسکرول کند تا آیتم بیشتری بگیرد (مثال: 8)"
+        required: true
+        default: "8"
 
 jobs:
   download:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install tools
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools (ffmpeg, jq, yt-dlp)
         run: |
           set -e
           sudo apt update -qq
           sudo apt install -y ffmpeg jq
-          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+            -o /usr/local/bin/yt-dlp
           sudo chmod +x /usr/local/bin/yt-dlp
 
           echo "yt-dlp path: $(which yt-dlp)"
           yt-dlp --version
-          echo "Has twitter extractor?"
-          yt-dlp --list-extractors | grep -i twitter || true
 
       - name: Export cookies
         run: |
+          set -e
           echo "${{ secrets.X_COOKIES }}" > cookies.txt
 
       - name: Restore yt-dlp archive cache (skip duplicates across runs)
@@ -43,23 +51,119 @@ jobs:
           restore-keys: |
             ytdlp-archive-${{ github.event.inputs.username }}
 
-      - name: Fetch list from X (media tab)
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Playwright
         run: |
           set -e
-          USER="${{ github.event.inputs.username }}"
+          npm init -y
+          npm i playwright
+          npx playwright install --with-deps chromium
 
-          # نکته: به جای پروفایل خام، از /media استفاده می‌کنیم تا yt-dlp بهتر تشخیص دهد
-          URL="https://x.com/$USER/media"
-          echo "Fetching: $URL"
+      - name: Scrape tweet URLs from /media (Playwright)
+        env:
+          USERNAME: ${{ github.event.inputs.username }}
+          SCROLL_PAGES: ${{ github.event.inputs.scroll_pages }}
+        run: |
+          set -e
+          cat > scrape.mjs <<'EOF'
+          import fs from "fs";
+          import { chromium } from "playwright";
 
-          yt-dlp \
-            --cookies cookies.txt \
-            --flat-playlist \
-            --playlist-end 400 \
-            "$URL" \
-            -J > tweets.json
+          const username = process.env.USERNAME;
+          const scrollPages = parseInt(process.env.SCROLL_PAGES || "8", 10);
 
-          echo "Entries: $(jq '.entries | length' tweets.json)"
+          const cookiesTxt = fs.readFileSync("cookies.txt", "utf8");
+
+          // تبدیل cookies.txt (Netscape) به cookies قابل استفاده در Playwright
+          function parseNetscapeCookies(text) {
+            const lines = text.split(/\r?\n/);
+            const out = [];
+            for (const line of lines) {
+              if (!line || line.startsWith("#")) continue;
+              const parts = line.split("\t");
+              if (parts.length < 7) continue;
+              const [domain, , path, secure, expires, name, value] = parts;
+              out.push({
+                domain,
+                path,
+                name,
+                value,
+                expires: Number(expires) || -1,
+                httpOnly: false,
+                secure: secure === "TRUE",
+                sameSite: "Lax",
+              });
+            }
+            return out;
+          }
+
+          const browser = await chromium.launch({ headless: true });
+          const context = await browser.newContext({
+            viewport: { width: 1280, height: 900 },
+            userAgent:
+              "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+          });
+
+          // به Playwright باید domain ها درست باشند (x.com و .x.com)
+          // بعضی خروجی‌ها domain=twitter.com دارند؛ تلاش می‌کنیم هر دو را set کنیم.
+          const rawCookies = parseNetscapeCookies(cookiesTxt);
+
+          // Normalization: اگر twitter.com بود، x.com هم اضافه کن
+          const expanded = [];
+          for (const c of rawCookies) {
+            expanded.push(c);
+            if (c.domain.includes("twitter.com")) {
+              expanded.push({ ...c, domain: c.domain.replace("twitter.com", "x.com") });
+            }
+          }
+
+          // Playwright cookies نیاز به url ندارد ولی domain معتبر می‌خواهد
+          await context.addCookies(expanded);
+
+          const page = await context.newPage();
+          const url = `https://x.com/${username}/media`;
+          console.log("Opening:", url);
+
+          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000 });
+          await page.waitForTimeout(3000);
+
+          // اسکرول برای لود آیتم‌های بیشتر
+          for (let i = 0; i < scrollPages; i++) {
+            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+            await page.waitForTimeout(2500);
+          }
+
+          // جمع‌آوری لینک توییت‌ها
+          const links = await page.evaluate(() => {
+            const a = Array.from(document.querySelectorAll('a[href*="/status/"]'));
+            const hrefs = a.map(x => x.getAttribute("href")).filter(Boolean);
+
+            // فقط لینک‌های status (بدون query)
+            const cleaned = hrefs
+              .map(h => h.split("?")[0])
+              .filter(h => /\/status\/\d+/.test(h));
+
+            // تبدیل به URL کامل
+            const full = cleaned.map(h => (h.startsWith("http") ? h : `https://x.com${h}`));
+            return Array.from(new Set(full));
+          });
+
+          console.log("Found status links:", links.length);
+
+          // ذخیره
+          fs.writeFileSync("all_links.txt", links.join("\n") + "\n", "utf8");
+
+          await browser.close();
+          EOF
+
+          node scrape.mjs
+
+          echo "Total scraped: $(wc -l < all_links.txt)"
+          head -n 20 all_links.txt || true
 
       - name: Select range from end + unique
         run: |
@@ -67,25 +171,26 @@ jobs:
           START="${{ github.event.inputs.start }}"
           END="${{ github.event.inputs.end }}"
 
-          TOTAL=$(jq '.entries | length' tweets.json)
+          # unique + remove empty
+          sed '/^\s*$/d' all_links.txt | sort -u > all_unique.txt
+
+          TOTAL=$(wc -l < all_unique.txt)
           echo "TOTAL=$TOTAL"
 
-          # start باید کوچکتر از end باشد (مثلاً start=10 و end=15)
           START_I=$((TOTAL - START))
           END_I=$((TOTAL - END))
-
           if [ "$END_I" -lt 0 ]; then END_I=0; fi
           if [ "$START_I" -lt 0 ]; then START_I=0; fi
 
-          jq -r ".entries[$END_I:$START_I] | .[].url" tweets.json \
-            | sed '/^null$/d' \
-            | sort -u > list.txt
+          # tail/head برای برش از انتها
+          # می‌خواهیم لینک‌های بازه END..START از آخر را برداریم
+          # مثال: TOTAL=100, start=10, end=15 => خطوط 85..90
+          awk -v s="$END_I" -v e="$START_I" 'NR>s && NR<=e {print}' all_unique.txt > list.txt
 
-          echo "Selected URLs: $(wc -l < list.txt)"
-          echo "Sample:"
-          head -n 20 list.txt || true
+          echo "Selected: $(wc -l < list.txt)"
+          cat list.txt
 
-      - name: Download videos (skip duplicates, video-only attempts)
+      - name: Download videos (skip duplicates)
         run: |
           set -e
           mkdir -p downloads
